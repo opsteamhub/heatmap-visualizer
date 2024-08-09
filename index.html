@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Heatmap Example</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f0f0f0;
+      }
+      form {
+        width: 100%;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        padding: 5px 0;
+        gap: 10px;
+      }
+      .form-container {
+        height: 7vh;
+        width: 100%;
+        background-color: rgb(90, 148, 166);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 20px;
+      }
+      .map-container {
+        height: 80vh;
+        width: 100%;
+      }
+      .control-container {
+        width: 100%;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        background-color: #d9d9d9;
+        padding: 5px;
+        gap: 10px;
+      }
+      .slider-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .slider-label {
+        margin: 5px 0;
+      }
+      .slider {
+        width: 100px;
+      }
+      .select-width {
+        flex-grow: 2;
+        margin: 0 !important;
+      }
+      .button-width {
+        flex-grow: 1;
+        margin: 0 !important;
+      }
+      .file-input-width {
+        flex-grow: 1;
+        margin: 0 !important;
+      }
+    </style>
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+    />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat/dist/leaflet-heat.js"></script>
+  </head>
+  <body>
+    <div class="form-container">
+      <form id="mapForm" class="form-inline">
+        <input
+          type="file"
+          id="fileInput"
+          class="form-control file-input-width"
+          accept=".csv"
+        />
+        <select id="group" class="form-control select-width" disabled></select>
+        <input
+          type="submit"
+          value="Gerar Mapa"
+          class="btn btn-primary button-width"
+          disabled
+        />
+      </form>
+    </div>
+    <div class="control-container">
+      <div class="slider-container">
+        <span class="slider-label">Heatmap Intensity:</span>
+        <input
+          type="range"
+          id="intensitySlider"
+          class="slider"
+          min="0"
+          max="50"
+          value="25"
+        />
+        <span id="intensityValue">25</span>
+      </div>
+      <div class="slider-container">
+        <span class="slider-label">Radius:</span>
+        <input
+          type="range"
+          id="radiusSlider"
+          class="slider"
+          min="1"
+          max="50"
+          value="25"
+        />
+        <span id="radiusValue">25</span>
+      </div>
+      <div class="slider-container">
+        <span class="slider-label">Blur:</span>
+        <input
+          type="range"
+          id="blurSlider"
+          class="slider"
+          min="0"
+          max="50"
+          value="12"
+        />
+        <span id="blurValue">12</span>
+      </div>
+      <div class="slider-container">
+        <span class="slider-label">Max Value:</span>
+        <input
+          type="range"
+          id="maxSlider"
+          class="slider"
+          min="0.1"
+          max="2"
+          step="0.1"
+          value="1"
+        />
+        <span id="maxValue">1.0</span>
+      </div>
+    </div>
+    <div id="map" class="map-container"></div>
+
+    <script>
+      let map
+      let heatLayer
+
+      function parseCoordinates(coordStr) {
+        if (!coordStr) return null
+        const coords = coordStr.slice(1, -1).split(',').map(Number)
+        return [coords[0], coords[1]]
+      }
+
+      function parseCSV(file) {
+        return new Promise((resolve, reject) => {
+          Papa.parse(file, {
+            header: true,
+            dynamicTyping: true,
+            complete: function (results) {
+              resolve(results.data)
+            },
+            error: function (error) {
+              reject(error)
+            }
+          })
+        })
+      }
+
+      function createMap() {
+        if (map) {
+          map.remove()
+        }
+
+        map = L.map('map').setView([0, 0], 2.5)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '© OpenStreetMap'
+        }).addTo(map)
+      }
+
+      async function generateHeatmap(
+        data,
+        selectedGroup,
+        intensity,
+        radius,
+        blur,
+        max
+      ) {
+        createMap()
+
+        const coordinates = []
+
+        data.forEach(row => {
+          if (selectedGroup === 'Todos' || row.Group === selectedGroup) {
+            const coords = parseCoordinates(row.Coordinates)
+            if (coords) {
+              coordinates.push(coords)
+            }
+          }
+        })
+
+        heatLayer = L.heatLayer(coordinates, {
+          radius: radius,
+          blur: blur,
+          max: max,
+          maxZoom: 10,
+          gradient: {
+            0.4: 'blue',
+            0.6: 'lime',
+            0.8: 'red'
+          }
+        }).addTo(map)
+      }
+
+      document
+        .getElementById('fileInput')
+        .addEventListener('change', async function (e) {
+          const file = e.target.files[0]
+          if (!file) return
+
+          const data = await parseCSV(file)
+
+          const groupSelect = document.getElementById('group')
+          const groups = ['Todos', ...new Set(data.map(row => row.Group))]
+
+          groupSelect.innerHTML = ''
+          for (let group of groups) {
+            const option = document.createElement('option')
+            option.value = group
+            option.textContent = group
+            groupSelect.appendChild(option)
+          }
+
+          groupSelect.disabled = false
+          document.querySelector('input[type="submit"]').disabled = false
+
+          const intensity = parseInt(
+            document.getElementById('intensitySlider').value,
+            10
+          )
+          const radius = parseInt(
+            document.getElementById('radiusSlider').value,
+            10
+          )
+          const blur = parseInt(document.getElementById('blurSlider').value, 10)
+          const max = parseFloat(document.getElementById('maxSlider').value)
+          await generateHeatmap(data, 'Todos', intensity, radius, blur, max)
+        })
+
+      document
+        .getElementById('mapForm')
+        .addEventListener('submit', async function (e) {
+          e.preventDefault()
+          const groupSelect = document.getElementById('group')
+          const selectedGroup = groupSelect.value
+          const file = document.getElementById('fileInput').files[0]
+          if (!file) return
+
+          const data = await parseCSV(file)
+          const intensity = parseInt(
+            document.getElementById('intensitySlider').value,
+            10
+          )
+          const radius = parseInt(
+            document.getElementById('radiusSlider').value,
+            10
+          )
+          const blur = parseInt(document.getElementById('blurSlider').value, 10)
+          const max = parseFloat(document.getElementById('maxSlider').value)
+          await generateHeatmap(
+            data,
+            selectedGroup,
+            intensity,
+            radius,
+            blur,
+            max
+          )
+        })
+
+      document
+        .getElementById('intensitySlider')
+        .addEventListener('input', function (e) {
+          const intensity = parseInt(e.target.value, 10)
+          document.getElementById('intensityValue').textContent = intensity
+
+          if (heatLayer) {
+            heatLayer.setOptions({
+              radius: intensity,
+              blur: intensity / 2
+            })
+          }
+        })
+
+      document
+        .getElementById('radiusSlider')
+        .addEventListener('input', function (e) {
+          const radius = parseInt(e.target.value, 10)
+          document.getElementById('radiusValue').textContent = radius
+
+          if (heatLayer) {
+            heatLayer.setOptions({
+              radius: radius
+            })
+          }
+        })
+
+      document
+        .getElementById('blurSlider')
+        .addEventListener('input', function (e) {
+          const blur = parseInt(e.target.value, 10)
+          document.getElementById('blurValue').textContent = blur
+
+          if (heatLayer) {
+            heatLayer.setOptions({
+              blur: blur
+            })
+          }
+        })
+
+      document
+        .getElementById('maxSlider')
+        .addEventListener('input', function (e) {
+          const max = parseFloat(e.target.value)
+          document.getElementById('maxValue').textContent = max.toFixed(1)
+
+          if (heatLayer) {
+            heatLayer.setOptions({
+              max: max
+            })
+          }
+        })
+    </script>
+  </body>
+</html>
